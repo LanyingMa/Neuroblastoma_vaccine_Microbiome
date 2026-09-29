@@ -1,0 +1,161 @@
+
+# Intro
+```{r, warning=F,  message=FALSE}
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(RPostgreSQL)
+library(lubridate)
+library(janitor)
+library(ggpubr)
+library(gtsummary)
+library(survival)
+library(survminer)
+library(vegan)
+library(ape)
+library(phyloseq)
+library(microViz)
+library(ggtree)
+library(yingtools2)
+library(ggrepel)
+library(tidyverse)
+library(speedyseq)
+library(randomForest)
+library(caret)
+library(patchwork)
+library(forestmodel)
+library(microbiome)
+```
+## Load the important datasets
+```{r, warning=F,  message=FALSE}
+titers<-read_rds("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/titers_deidentified.rds")
+cohort<-read_rds("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/cohort_deidentified.rds") %>%
+  filter(!(UPN %in% c("2730B","2759B"))) # confirmed by OM on 20260912. as these two original UPNs patients are also in PRiorRelapse2
+  
+#baseline_samples<-read_csv("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/baseline_samples.csv")
+samples<-read_rds("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/samples_deidentified.rds") %>%
+   filter(!(UPN %in% c("2730B","2759B")))
+glucan<-read_rds("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/glucan_deidentified.rds") %>%
+   filter(!(UPN %in% c("2730B","2759B")))
+asv_alpha<-read_csv("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/asv_alpha.csv")
+samples_counts<-read_csv("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/samples_counts.csv")%>%
+   filter(!(UPN %in% c("2730B","2759B")))
+asv_annotation_blast_ag<- read_csv("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/asv_annotation_blast_ag.csv")
+
+antibiotics<- read_rds("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/antibiotics_deidentified.rds")%>%
+   filter(!(UPN %in% c("2730B","2759B")))
+# age_prediction<- read_csv("/Volumes/vandenbrinklab/Oriana/NB/Data/age_prediction/final_age_model_predictions.csv") 
+# age_prediction$sampleid<-  str_extract(age_prediction$sampleid, "(?<=_)[^_]+(?=_)")
+scfa_genes_clear<-read_csv("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/scfa_genes_clear.csv")
+shotgun_list<- read_csv("/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/shotgun_list.csv")
+
+library(vdbR)
+ library(RPostgres)
+# source("/Volumes/Macintosh HD/Users/miltiado/Documents/library/db_connect_simple.R")
+# connect_database(config_file = "/Volumes/Macintosh HD/Users/miltiado/Documents/library/dbConfig.txt")
+connect_database(config_file = "/Users/lanyingma/Library/CloudStorage/OneDrive-MemorialSloanKetteringCancerCenter/Documents/db_config.txt")
+config_file <- data.table::fread("/Users/lanyingma/Library/CloudStorage/OneDrive-MemorialSloanKetteringCancerCenter/Documents/db_config.txt", nrows = 1)
+con <- dbConnect(RPostgres::Postgres(),
+                 dbname = "microbiome",
+                 host = "plvglover1.mskcc.org",
+                 port = 5432,
+                 user = config_file$user,
+                 password = config_file$pass)
+samples_mmf=dbReadTable(con,"samples_mmf")
+
+```
+
+# cohort with multiple vaccine
+```{r eval=FALSE}
+
+multi_vac <- cohort %>% 
+  filter(Vaccine_treatment %in% c("second","third"  ))
+multi_vac_day <- multi_vac %>% left_join(samples, by = "UPN")
+cr2_multi$UPN %in% (cohort %>% filter(PriorRelapse==1) %>% pull(UPN))
+
+df2 <- cohort%>%filter(PriorRelapse==2)
+multi_upn <- df2 %>% group_by(record_id) %>% summarise(n_upn = n_distinct(UPN)) %>%
+  filter(n_upn >1)
+
+multi_vac
+ 
+```
+
+
+
+## Patient characteristics (Table 1)
+```{r, warning=F,  message=FALSE}
+cohort %>% 
+  mutate(sex=ifelse(sex==1, "M", "F")) %>% 
+  select(PriorRelapse, age_diagnosis, age_vaccine, sex, Stage, MYCN, CR, HCT) %>% 
+  tbl_summary() 
+
+cohort %>% 
+  mutate(sex=ifelse(sex==1, "M", "F")) %>% 
+  filter(!(UPN %in% c("2730B","2759B"))) %>% # confirmed by OM on 20260916
+  select(PriorRelapse, age_diagnosis, age_vaccine, sex, Stage, MYCN, CR, HCT) %>% 
+  tbl_summary(by="PriorRelapse") %>%
+  add_p()
+
+```
+
+
+
+## Success of sample collection - Suppl fig 1
+```{r, warning=F,  message=FALSE}
+
+
+baseline_samples<-samples %>% filter(sample_day>= -15 & sample_day<=15) %>% 
+   filter(!(UPN %in% c("2730B","2759B"))) %>%
+  group_by(UPN) %>% 
+  arrange(sample_day) %>% 
+  dplyr::slice(1) %>% ungroup() # 123 samples with baseline after removing these two UPNs
+
+# Sort patients based on the number of samples
+sorted_patients <- samples %>% 
+  filter(!(UPN %in% c("2730B","2759B"))) %>%
+   group_by(UPN) %>% add_count() %>% 
+  dplyr::slice(1) %>% 
+  arrange(desc(n))
+
+df<-samples
+# Reorder the Patient factor based on the sorted order
+df$Patient <- factor(df$UPN, levels = sorted_patients$UPN)
+
+#these are with 344 samples
+df%>% filter(!(UPN %in% c("2730B","2759B"))) %>%
+mutate(record_id=as.character(UPN)) %>% 
+ggplot(aes(x=sample_day, y=Patient), group=Patient)+
+geom_point(color="#2ca25f", size=1, alpha=0.7)+
+  ylab("Patients")+
+  xlab("Time from vaccine entry")+
+  geom_line(alpha=0.5, color="#2ca25f")+
+   theme_classic()+
+   geom_vline(xintercept = c(1, 8, 22, 50, 134, 217, 358), linetype = "dashed", color="grey27")+
+  theme(axis.text.y = element_blank())
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/sample_collection.pdf", width = 4, height=2.5)
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/suppl_fig1b.pdf",width = 4, height=2.5 )
+#ggsave("/Volumes/Macintosh HD/Users/miltiado/Documents/NB/plots/sample_collection.pdf", width = 4, height=2.5)
+
+ggsave("../res/aft_rev2/suppl_fig1b.pdf",width = 4, height=2.5 )
+
+
+```
+
+
+## Distribution of relapses (Suppl fig3)
+```{r, warning=F,  message=FALSE}
+df<-cohort %>% filter(VRelapse==1)
+quantile(df$VPFS)
+quantile(df$VPFS, 0.90)
+ggplot(aes(x=VPFS), data=df)+
+  geom_histogram() +
+  geom_vline(xintercept=12, linetype="dashed",  color = "red", size=1.5)+
+  xlab("Time of relapse (mo) since vaccine#1")+
+  ylab("Number of patients")+
+  theme_classic()
+ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/suppl_fig3e.pdf",width = 4, height=2.5 )
+#ggsave("/Volumes/Macintosh HD/Users/miltiado/Documents/NB/plots/relapses.pdf", height=3, width=4)
+```
+
+

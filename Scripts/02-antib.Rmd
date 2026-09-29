@@ -1,0 +1,474 @@
+
+# Antibiotics
+
+## Load info of abx dataset
+```{r, warning=F,  message=FALSE}
+# 20260603 due to conjunctivitis, we need to remove erythromycin as it is topical. 
+
+antib<-antibiotics %>% 
+  filter(Reason !="conjunctivitis") %>%
+  filter(start_relative>= -15 | end_relative >= -15) %>% # start_relative and end_relative are relative to vaccine day.
+  filter(start_relative <=15 | end_relative<= 15 ) %>% # with these two filtering, it filter out the ones with result as NA
+  # mutate(abx_updated=ifelse(result=="ceftriaxone"|result=="metronidazole"|result=="amoxicillin/clavulanate", 
+  #                           "high", "mod/none")) %>% 
+  # mutate(abx_updated=ifelse(is.na(abx_updated), "mod/none", abx_updated)) %>%
+    mutate(abx_pert= case_when(# these are confirmed by OM.
+    result %in% c("amoxicillin","cefazolin", "amoxicillin/clavulanate","ceftriaxone","metronidazole") ~ "high/mod",
+    result %in% c("rifaximin", "levofloxacin" )~"low", # confirmed on 20260820
+    TRUE~NA_character_
+  )) %>%
+    mutate(abx_pert2=ifelse(abx_pert=="high/mod", "high/mod", "no/low")) 
+# c("2730B","2759B") %in% antib$UPN
+#[1] FALSE FALSE they are not here.
+
+
+# 23 UPNs in this antib df. 
+# antib_p <- antib %>% inner_join(cohort[,c("UPN","MYCN","HCT","age_vaccine","sex","PriorRelapse")], by="UPN") %>%
+#   mutate(orig_upn = str_extract(UPN, "^\\d{4}")) %>%
+#   left_join(redcap_vdb_phi%>%mutate(record_id=as.character(record_id)), by=c("orig_upn"="record_id"))
+# write.csv(antib_p, "../res/02_antib.csv", row.names = F)
+
+
+```
+
+## Effects of abx on microbiome - suppl fig 1
+```{r, warning=F,  message=FALSE}
+samples_abx<-samples %>% 
+  left_join(antib %>% mutate(UPN=as.character(UPN))) %>% 
+  inner_join(asv_alpha) %>% 
+   mutate(antibiotics=ifelse(is.na(result), "no", result)) %>%
+  mutate(exposed_sample=ifelse(antibiotics!="no" & sample_day>(start_relative), "exposed", "not exposed")) %>% 
+  mutate(exposed_sample=ifelse(is.na(exposed_sample), "not exposed", exposed_sample)) %>% # there is no NA actually
+  mutate(time_sample_dif_start=as.integer(start_relative-sample_day)) %>% 
+  mutate(time_sample_dif_end=as.integer(end_relative-sample_day)) %>% 
+  filter((time_sample_dif_end>=-15 | time_sample_dif_start >=-15) & 
+           (time_sample_dif_end<=15 | time_sample_dif_start <=15 )) %>%
+  #filter(!(UPN %in% multi_vac$UPN)) %>% # confirmed by OM. on 20260918
+  filter(!(UPN %in% c("2730B","2759B"))) # confirmed to remove these two UPNs by OM. as they have multi_vaccine and original UPN are also in PriorRelapse2.
+  
+# to create paired samples
+# samples_abx_paired<-samples_abx %>%
+#   group_by(UPN, antibiotics,exposed_sample) %>%  # to create paired samples
+#   arrange(time_sample_dif_start) %>%
+#   dplyr::slice(1) %>%
+#   ungroup() %>%
+#   group_by(UPN, antibiotics) %>%
+#     add_count() %>%
+#   filter(n==2)
+# the above codes have stool smaples during the abx usage period
+
+# samples_abx_paired<-samples_abx %>%
+#   mutate(relation = case_when(
+#     sample_day < start_relative ~ "pre",
+#     sample_day > start_relative & sample_day < end_relative ~ "during",
+#     sample_day > end_relative ~ "post",
+#     TRUE ~ NA_character_
+#   )) %>% 
+#   filter(relation %in% c("pre", "post")) %>% # only have pre and post
+#   group_by(UPN) %>%
+#   filter(n_distinct(relation)==2) %>% # have both pre and post samples
+#   ungroup()
+# 
+# 
+# 
+# 
+# samples_abx_paired %>% 
+#     group_by(exposed_sample) %>% 
+#   mutate(med_div=median(simpson_reciprocal)) %>% 
+#   distinct(exposed_sample, med_div)
+#  
+# samples_abx_paired$exposed_sample<-factor(samples_abx_paired$exposed_sample, levels=c("not exposed", "exposed"))
+# 
+# ggplot(aes(x=exposed_sample, y=simpson_reciprocal, color=exposed_sample), data=samples_abx_paired) +
+#   geom_boxplot(width=0.4)+
+#   geom_jitter(wisth=0.4)+
+#   geom_line(aes(group=UPN, color=result))+
+#   ylab("a-diversity") +
+#     theme_classic()+
+#   scale_color_manual(values=c("#a6611a", "#2E9FDF", "#d8b365", "#5ab4ac","#01665e", "grey29")) +
+#   stat_compare_means(comparisons=list(c("exposed","not exposed")))+
+#   theme(text = element_text(size = 15))
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/suppl_fig1c.pdf", width=5, height=4, dpi=150)
+# #ggsave("/Volumes/Macintosh HD/Users/miltiado/Documents/NB/plots/adiv_abx_detailed.pdf", width=5, height=4, dpi=150)
+
+# why not use not exposed and exposed for paired.
+
+samples_abx_paired2 <- samples_abx %>%
+  filter(!(UPN %in% c("2730B","2759B"))) %>%
+  group_by(UPN) %>%
+  filter(n_distinct(exposed_sample)>=2) %>%
+  ungroup()
+
+samples_abx_paired2$exposed_sample<-factor(samples_abx_paired2$exposed_sample, levels=c("not exposed", "exposed"))
+
+# ggplot(aes(x=exposed_sample, y=simpson_reciprocal, color=exposed_sample), data=samples_abx_paired2) +
+#   geom_boxplot(width=0.4)+
+#   geom_jitter(wisth=0.4)+
+#   geom_line(aes(group=UPN, color=result))+
+#   ylab("a-diversity") +
+#     theme_classic()+
+#   scale_color_manual(values=c("#a6611a", "#2E9FDF", "#d8b365", "#5ab4ac","#01665e", "grey29")) +
+#   stat_compare_means(method = "wilcox.test",
+#                      comparisons=list(c("exposed","not exposed")))+
+#   theme(text = element_text(size = 15))
+library(ggpubr)
+ggpaired(samples_abx_paired2, x="exposed_sample",y="simpson_reciprocal",id="UPN", color = "exposed_sample", 
+         line.color = "grey70",
+  line.size = 0.4,
+  palette = c("exposed" = "#a6611a","not exposed" = "#2E9FDF" ) ) +
+  ylab("a-diversity") +
+  stat_compare_means(
+    method = "wilcox.test",
+    comparisons = list(c("exposed", "not exposed")),
+    label = "p.format",
+    label.y = 25
+  ) +
+  theme_classic() +
+  theme(text = element_text(size = 15))
+
+# ggsave("../res/suppl_fig1c_differentFiltering.pdf", width=5, height=4, dpi=150)
+ggsave("../res/aft_rev2/suppl_fig1c_differentFiltering.pdf", width=5, height=4, dpi=150)
+samples_abx_paired2 %>% 
+    group_by(exposed_sample) %>% 
+  mutate(med_div=median(simpson_reciprocal)) %>% 
+  distinct(exposed_sample, med_div)
+
+
+# what are different
+
+# upn_missing <- samples_abx_paired2[which(!(samples_abx_paired2$UPN %in%samples_abx_paired$UPN)) , ]
+# UPN 2730 is the one.  there is one time the abx uage day and sample day is on the same day. so there is pre, NA and post.
+
+
+
+# if using the samples_abx_paired2, other ways to do the stats
+library(lme4)
+library(lmerTest)
+fit <- lmer(
+  simpson_reciprocal ~ exposed_sample + (1 | UPN),
+  data = samples_abx_paired2
+)
+summary(fit)$coefficients
+
+```
+
+## Are antibiotics associated with PFS? Fig 1 
+```{r, warning=F,  message=FALSE}
+cohort_antibiotics<-cohort %>% 
+  left_join(antib) %>%
+  # mutate(
+  # # abx_updated = ifelse(is.na(result), "mod/none", abx_updated),
+  #        abx_pert = ifelse(is.na(abx_pert), "non-antib", abx_pert))%>%
+  # mutate(abx_binary=ifelse(abx_pert=="non-antib", "no", "yes")) %>%
+    mutate(abx_pert2=ifelse(abx_pert=="high/mod", "high/mod", "no/low")) %>%
+  mutate(abx_pert2=ifelse(is.na(abx_pert), "no/low", abx_pert2)) %>%
+  group_by(UPN)%>%
+  add_count() 
+
+  # arrange(abx_updated)%>% dplyr::slice(1)
+
+
+
+
+cohort_antibiotics$abx_pert2<-factor(cohort_antibiotics$abx_pert2, levels=c("no/low", "high/mod"))
+# fit<-survfit(Surv(VPFS_upd, VRelapse)~abx_pert2, data=cohort_antibiotics)
+fit<-survfit(Surv(VPFS_upd, VRelapse)~abx_pert+PriorRelapse, data=cohort_antibiotics)
+p<-ggsurvplot(fit, data=cohort_antibiotics,
+           palette = c("#ef8a62","#999999","#a6611a","#2166AC"),
+           # palette = c( "#E7B800", "#2E9FDF","#a6611a","#2166AC"),
+
+           conf.int=TRUE,
+           pval=TRUE,
+           risk.table = T,
+           xlim = c(0,36), 
+           break.x.by = 6)
+# if priorrelapse is in formula
+  p$plot <- p$plot +
+  guides(
+    color = guide_legend(nrow = 2, byrow = TRUE),
+    fill  = guide_legend(nrow = 2, byrow = TRUE)
+  ) +
+  theme(
+    legend.position = "top"
+  )
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/fig1b_plot.pdf",p$plot, height=4, width=5)
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/fig1b_table.pdf",p$table, height=2, width=5)
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/fig1b_plot_withCR.pdf",p$plot, height=5, width=6)
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/fig1b_table_withCR.pdf",p$table, height=3, width=6)
+ggsave("../res/aft_rev2/fig1b_plot.pdf",p$plot, height=4, width=5)
+ggsave("../res/aft_rev2/fig1b_table.pdf",p$table, height=2, width=5)
+ggsave("../res/aft_rev2/fig1b_plot_withCR.pdf",p$plot, height=4, width=5)
+ggsave("../res/aft_rev2/fig1b_table_withCR.pdf",p$table, height=2, width=5)
+
+
+# multi varaiates
+formula_m <- as.formula(paste0("Surv(VPFS_upd, VRelapse) ~ abx_pert2+MYCN+PriorRelapse+age_vaccine"))
+fit_cox <- coxph(
+  formula_m,
+  data = cohort_antibiotics
+)
+
+summary(fit_cox)
+#                   exp(coef) exp(-coef) lower .95 upper .95
+# abx_pert2high/mod     2.151     0.4649     1.116     4.148
+
+#ggsave("/Volumes/Macintosh HD/Users/miltiado/Documents/NB/plots/abx_exposure_PFS.pdf", height=4, width=5)
+#ggsave("/Volumes/Macintosh HD/Users/miltiado/Documents/NB/plots/abx_exposure_PFS_RT.pdf", height=2, width=5)
+
+# cohort_antibiotics$abx_updated<-factor(cohort_antibiotics$abx_updated, levels=c("mod/none","high"))
+
+# separate them by CR1 and CR2
+df <-cohort_antibiotics %>% filter(PriorRelapse==2) 
+fit<-survfit(Surv(VPFS_upd, VRelapse)~abx_pert2, data=df)
+# fit<-survfit(Surv(VPFS_upd, VRelapse)~abx_pert, data=cohort_antibiotics)
+p<-ggsurvplot(fit, data=df,
+           # palette = c("#2E9FDF","#E7B800"),
+           palette = c( "#E7B800", "#2E9FDF","#a6611a","#2166AC"),
+           conf.int=TRUE,
+           pval=TRUE,
+           risk.table = T,
+           xlim = c(0,36), 
+           break.x.by = 6)
+ggsave("../res/fig1b_plot_cr2.pdf",p$plot, height=4, width=5)
+ggsave("../res/fig1b_table_cr2.pdf",p$table, height=2, width=5)
+
+```
+
+## Evaluate exposure to antibiotics and titers
+```{r,  message=FALSE}
+df<-cohort_antibiotics %>% inner_join(titers[,c("UPN", "c4_titer","c4_high_median" )], by="UPN") %>% 
+  mutate(log_titer=log(c4_titer+1)) %>% 
+  left_join(glucan[,c("UPN","group")], by="UPN")
+
+df %>% group_by(abx_pert2) %>% 
+  summarise(med_titer=median(c4_titer))
+
+df %>% 
+  ggplot(aes(x=abx_pert2, y=c4_titer, color=abx_pert2))+
+  geom_boxplot(outlier.color = NA, width=0.4)+
+  geom_jitter(width=0.4, alpha=0.6)+
+  geom_smooth(method="lm")+
+  theme_classic()+
+  theme(legend.position="none")+
+  scale_color_manual(values=c("#ef8a62","#999999"))+
+  stat_compare_means(comparisons=list(c("high/mod", "no/low")), method = "wilcox.test")+
+  labs(y="Anti-GD2 IgG")
+
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/fig1c.pdf", width=3, height=3.5, dpi=150)  
+# ggsave("../res/fig1c.pdf", width=3, height=3.5, dpi=150)  
+ggsave("../res/aft_rev2/fig1c.pdf", width=3, height=3.5, dpi=150)  
+#ggsave("/Volumes/Macintosh HD/Users/miltiado/Documents/NB/plots/titers_abx.pdf", width=2, height=2.5, dpi=150)
+
+df %>% 
+  ggplot(aes(x=abx_pert2, y=c4_titer, color=abx_pert2))+
+  geom_boxplot(outlier.color = NA, width=0.4)+
+  geom_jitter(width=0.4, alpha=0.6)+
+  geom_smooth(method="lm")+
+  theme_classic()+
+  theme(legend.position="none")+
+  scale_color_manual(values=c("#999999","#ef8a62"))+
+  stat_compare_means(comparisons=list(c("high/mod", "no/low")), method = "wilcox.test")+
+  labs(y="Anti-GD2 IgG")+
+  facet_wrap(~PriorRelapse)
+ggsave("../res/aft_rev2/fig1c_facet_CR.pdf", width=3, height=3.5, dpi=150)
+
+
+df$abx_pert2 <- factor(df$abx_pert2, levels = c("no/low", "high/mod")) 
+
+table_uv_titer <- df %>% 
+  ungroup() %>% 
+  select(-UPN, -record_id) %>% 
+  select(age_vaccine, sex,
+        log_titer,
+         #alphadiv,
+         MYCN,
+         HCT,
+         group,
+         abx_pert2,
+        Reason
+  ) %>% 
+  tbl_uvregression(method=glm,
+                   y=log_titer,
+                   exponentiate = FALSE,
+                   method.args = list(family=gaussian)) %>% 
+  bold_p()
+
+table_uv_titer
+
+df$abx_pert2 <- factor(df$abx_pert2, levels = c("no/low", "high/mod")) 
+
+model <- glm(log_titer~ abx_pert2 + MYCN + group, data = df, family = gaussian)
+summary(glm(log_titer ~ abx_pert2+MYCN,data=df,family=gaussian))
+
+df$titers_sqrt <- sqrt(df$c4_titer)
+model <- lm(titers_sqrt ~ abx_pert2, data = df)
+summary(model)
+
+# Beta coefficients
+coef(model)
+
+# 95% Confidence Intervals
+confint(model)
+
+df %>%
+  ungroup() %>%
+  select(-UPN, -record_id) %>%
+  select(c4_titer,
+         MYCN,
+         abx_pert2) %>%
+  glm(c4_titer ~ ., data = ., family = gaussian) %>%
+  tbl_regression(exponentiate = FALSE) %>%
+  bold_p()
+```
+
+## using df for coxph: uni-variates and Multivariate
+
+```{r}
+cohort_titer_abx <- cohort_antibiotics%>% left_join(titers[,c("UPN","c4_titer","c4_high_median" )],by="UPN") %>%
+  left_join(glucan[,c("UPN","group")], by ="UPN") %>%
+  mutate(age_y=age_vaccine/12,
+         MYCN=factor(MYCN, levels=c("no","amplified")),
+      HCT=factor(HCT, levels=c("no","yes")),
+      PriorRelapse = factor(PriorRelapse, levels=c("1","2")),
+      c4_high_median=factor(c4_high_median, levels = c("low_c4","high_c4")),
+      VRelapse = as.numeric(VRelapse),
+      age_binary = ifelse(age_y >=5,"older", "younger"))
+
+
+uni_v_cox <- data.frame()
+
+
+for (var_i in c("age_vaccine", "MYCN", "PriorRelapse" ,"HCT","group","sex","abx_pert2","c4_high_median","age_y")){
+  df_i <- cohort_titer_abx %>% filter(!is.na(.data[[var_i]]))
+  formula_i <- as.formula(paste0("Surv(VPFS_upd, VRelapse) ~ ", var_i))
+  fit_i <- coxph(formula_i, data = df_i)
+  res_i <- broom::tidy(fit_i) %>% 
+    filter(term != "(Intercept)") %>% 
+    mutate(
+      variable = var_i,
+      HR = exp(estimate),
+      loer95 =  exp(estimate - 1.96 * std.error), 
+      upper95  = exp(estimate + 1.96 * std.error),
+      n = nrow(df_i)
+    )
+  uni_v_cox <- bind_rows(uni_v_cox, res_i)
+  }
+ write.csv(uni_v_cox, "../res/aft_rev2/02-cox_univariates.csv", row.names = F)
+# mutlivariates
+formula_m <- as.formula("Surv(VPFS_upd, VRelapse) ~ age_vaccine+PriorRelapse+abx_pert2+MYCN")
+fit <- coxph(formula_m, data = cohort_titer_abx)
+summary(fit)
+
+
+```
+
+
+
+
+## Are baseline samples exposed to antibiotics? - Suppl fig 1
+```{r, warning=F,  message=FALSE}
+baseline_sample_abx<-samples %>% 
+  filter(!(UPN %in% c("2730B","2759B"))) %>%
+  filter(sample_day>= -15 & sample_day <=15) %>% 
+  left_join(antib) %>%
+  mutate(
+         abx_pert = ifelse(is.na(abx_pert), "non-antib", abx_pert))%>%
+  mutate(abx_binary=ifelse(abx_pert=="non-antib", "no", "yes")) %>% 
+    mutate(abx_pert2=ifelse(abx_pert=="high/mod", "high/mod", "no/low")) %>% 
+  mutate(abx_pert2=ifelse(abx_pert=="non-antib", "no/low", abx_pert2))%>%
+  mutate(exposed_sample=case_when(
+    abx_pert2=="high/mod" & (sample_day < start_relative) ~ "pre",
+    abx_pert2=="high/mod" & (sample_day >= start_relative & sample_day <= end_relative) ~ "during",
+    abx_pert2=="high/mod" & (sample_day > end_relative) ~ "post",
+    abx_pert2=="no/low"|is.na(abx_pert2) ~ "no/low",
+    TRUE ~ NA_character_
+  )
+           ) %>%
+  mutate(exposed_sample= factor(exposed_sample, levels= c("no/low", "pre", "during","post")))
+# 3 days of exposure.
+
+
+baseline_sample_abx %>% mutate(UPN=as.character(UPN)) %>% 
+  ggplot(aes(x=sample_day, y=UPN, color=exposed_sample)) +
+  geom_point(alpha=0.7)+
+  geom_line(aes(group=UPN), alpha=.6)+
+  ylab("Patients")+
+  xlab("Time from vaccine entry")+
+    theme_classic()+
+  theme(axis.text.y=element_blank())+
+  scale_color_manual(values=c("#56B4E9", "#009E73", "grey2","#ef8a62" ))+
+  theme(text = element_text(size = 12))
+# ggsave("/Volumes/Miltiadous_lab/Lanying/NB/plots/V11/suppl_fig1d.pdf", height=3.5, width=6)
+ggsave("../res/aft_rev2/suppl_fig1d.pdf", height=3.5, width=6)
+#ggsave("/Volumes/Macintosh HD/Users/miltiado/Documents/NB/plots/abx_exposure.pdf", height=3.5, width=6)
+baseline_sample_abx %>% mutate(UPN=as.character(UPN)) %>% 
+  left_join(cohort,  by="UPN") %>%
+  ggplot(aes(x=sample_day, y=UPN, color=exposed_sample)) +
+  geom_point(alpha=0.7)+
+  geom_line(aes(group=UPN), alpha=.6)+
+  ylab("Patients")+
+  xlab("Time from vaccine entry")+
+    theme_classic()+
+  theme(axis.text.y=element_blank())+
+  scale_color_manual(values=c("#56B4E9", "#009E73", "grey2","#ef8a62" ))+
+  theme(text = element_text(size = 12))+
+  facet_wrap(~PriorRelapse)
+ggsave("../res/aft_rev2/suppl_fig1d_facet_byCR.pdf", height=3.5, width=6)
+
+
+
+```
+
+## What about removing samples that were collected prior to antibiotic exposure?
+```{r, warning=F,  message=FALSE}
+#remove abx-exposed samples for baseline samples
+baseline_samples_abxfiltered<-samples %>% 
+  filter(!(UPN %in% c("2730B","2759B"))) %>%
+  filter(sample_day>= -15 & sample_day <=15) %>% 
+  left_join(antib, by="UPN") %>%
+  mutate(
+         abx_pert = ifelse(is.na(abx_pert), "non-antib", abx_pert))%>%
+  mutate(abx_binary=ifelse(abx_pert=="non-antib", "no", "yes")) %>% 
+    mutate(abx_pert2=ifelse(abx_pert=="high/mod", "high/mod", "no/low")) %>% 
+  mutate(abx_pert2=ifelse(abx_pert=="non-antib", "no/low", abx_pert2))%>%
+  mutate(exposed_sample=case_when(
+    abx_pert2=="high/mod" & (sample_day < start_relative) ~ "pre",
+    abx_pert2=="high/mod" & (sample_day >= start_relative & sample_day <= end_relative) ~ "during",
+    abx_pert2=="high/mod" & (sample_day > end_relative) ~ "post",
+    abx_pert2=="no/low"|is.na(abx_pert2) ~ "no/low",
+    TRUE ~ NA_character_
+  )
+           ) %>%
+  filter(exposed_sample!="pre") %>% 
+  group_by(UPN) %>% arrange(sample_day) %>% 
+  dplyr::slice(1) %>% 
+  ungroup() %>% 
+  distinct(UPN, sampleid, sample_day)
+
+# 20260916: 113 samples
+
+
+
+
+
+length(unique(baseline_samples_abxfiltered$UPN))
+
+#write_csv(baseline_samples_abxfiltered, #"/Volumes/vandenbrinklab/Oriana/NB/Data/final_dataset/baseline_samples_abxfiltered.csv")
+
+#evaluate all samples (not just baseline) - remove the samples collected around 1mo around abx exposure
+samples_all_filtered<-samples %>% 
+  filter(!(UPN %in% c("2730B","2759B"))) %>%
+  left_join(antib, by ="UPN") %>% 
+  mutate(abx_wth=ifelse(result %in% c("amoxicillin","cefazolin", "amoxicillin/clavulanate","ceftriaxone","metronidazole","levofloxacin" ), "high", "low"),
+         abx_pert2=ifelse(abx_pert=="high", "high/mod", "no/low")) %>% 
+  mutate(exposed_sample=ifelse(abx_wth=="high" & sample_day>(start_relative+1), "post-",
+                               ifelse(abx_wth=="high" & sample_day<=(start_relative+1), "pre-", "none"))) %>% 
+  mutate(exposed_sample=ifelse(is.na(exposed_sample), "none", exposed_sample)) %>% 
+  group_by(sampleid) %>% arrange(desc(exposed_sample)) %>% dplyr::slice(1) %>% 
+  filter(exposed_sample!="pre-") %>% 
+  distinct(UPN, sampleid, sample_day)
+
+```
+
+
+
