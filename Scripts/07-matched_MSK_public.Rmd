@@ -29,7 +29,58 @@ d_msk_public <- bray_mat[msk_ids, public_ids, drop = FALSE]
 
 ```
 
+# age distribution
+* fig4a
+```{r}
+
+meta <- data.frame(sample_data(ps_used))%>%rownames_to_column("sampleid")%>%
+  mutate(
+    plot_age = as.character(plot_age),
+    plot_age = ifelse(plot_age == "18-40", "18-25", plot_age),
+    plot_age = factor(
+      plot_age,
+      levels = c(
+        "0-1", "1-3", "3-5", "5-10",
+        "10-15", "15-18", "18-25"
+      )
+    )
+  ) %>%
+  group_by(plot_age) %>%
+  summarise(n=n_distinct(sampleid))
+age_colors <- c(
+  "0-1"   = "#D1C741",
+  "1-3"   = "#C8D73C",
+  "3-5"   = "#76B742",
+  "5-10"  = "#2FA044",
+  "10-15" = "#027F3D",
+  "15-18" = "#099184",
+  "18-25" = "#2B5D99"
+)
+
+ggplot(meta, aes(x=plot_age, y = n, fill=plot_age))+
+  geom_col()+
+  scale_fill_manual(values = age_colors) +
+  labs(x="age group",
+       y= "sample counts")+theme_classic()+
+  theme(legend.position = "none")
+ggsave("../Figures/Fig4a.pdf",  dpi = 200, width = 4, height=4)
+```
+
 # pcoa
+* PCoA, public cohort by age
+* Fig4b
+```{r}
+my_breaks <- c(0,1,6, 36, 120,  840)
+my_labels <- c("Newborn", "1M",  "6M",  "3Y", "10Y", "70Y" )
+plot_ordination(ps_used,  mgxphy_ord, color = "age_mo") + 
+  scale_color_viridis_c(breaks = my_breaks, labels = my_labels, 
+                       trans = scales::pseudo_log_trans(sigma = 0.001)) +
+  theme_classic()+
+  labs(color=NULL)
+ggsave("../Figures/Fig4b.pdf",dpi = 200, width = 8, height=6)
+```
+
+* Fig4c
 ```{r}
 
 mgxphy_ord <- phyloseq::ordinate(
@@ -43,13 +94,19 @@ p <- plot_ordination(
   color = "cohort"
 )
 
+p +scale_color_manual(
+    values = c(
+      "MSK" = "#1f3b73",
+      "public" = "grey60"
+    )
+  )+theme_classic()
+ggsave("../Figures/Fig4c.pdf",width = 8, height=6)
+
 coords <- p$data %>%rownames_to_column("sampleid") %>%
   select(sampleid, Axis.1, Axis.2, cohort)
 
 
 ```
-
-
 
 
 # get top3 matches for each MSK sample
@@ -75,17 +132,6 @@ top_matches <- read.csv("../Data/23_top3_matches.csv")
 matched_samples <- data.frame(sample_data(ps_used)) %>%rownames_to_column("sampleid") %>%
   filter(sampleid %in% c(top_matches$MSK, top_matches$public)) %>%
   mutate(cohort = factor(cohort, levels = c("public","MSK")))
-
-p1<-ggplot(matched_samples, aes(x=cohort, y=age_mo, color= cohort))+
-  geom_boxplot(width=0.3, outlier.shape = NA)+
-  geom_jitter(width=0.15)+
-  stat_compare_means(comparison = list(c("public", "MSK")),method="wilcox.test",
-                     aes(label = after_stat(p.format) ))+
-      theme_classic()+
-    theme(legend.position = "none")+
-    scale_color_manual(values=c("gray50","red4"))+
-  labs(y="age in month")
-
 
 
 ```
@@ -118,6 +164,8 @@ ggplot(coords_age, aes(x=Axis.1, y= age_mo/12, color=cohort))+ # change to year
 # ggsave("../Figures/fig4d.pdf", width=5, height=4)
 
 ```
+
+# relative age gap by comparing MSK and matched healthy samples
 
 * Suppl Fig3a and Suppl Fig3b
 
@@ -237,5 +285,28 @@ matched_age_df_cohort%>%
 ggsave("../Figures/suppl_fig3d_relAgeGap_titer.pdf", width=6, height = 4)
 ```
 
+# cox using relative age gap
+```{r}
+msk_alpha <- ps_used %>% ps_filter(cohort=="MSK") %>% estimate_richness(measures = "InvSimpson")%>% rownames_to_column("sampleid")%>%mutate(msk_id = str_extract(sampleid, "(?<=_)[^_]+(?=_)"))
+  
+
+df<-matched_age_df_cohort %>%
+    filter(PriorRelapse==1) %>%
+  left_join(glucan, by="UPN") %>%
+  left_join(titers[,c("UPN","c4_titer","c4_high_median" )], by="UPN") %>%
+   left_join(msk_alpha[,c("msk_id","InvSimpson")], by="msk_id")%>%
+   mutate(age_y = age_vaccine/12)
+fit<-survfit(Surv(VPFS_upd,VRelapse)~rel_gap_bin, data=df)
+p<- ggsurvplot(fit, data=df,
+           palette= c( "#E7B800", "#2E9FDF","#a6611a","#2166AC"),
+           conf.int=TRUE,
+           pval=TRUE,
+           risk.table = T,
+           xlim = c(0,36),
+          break.x.by = 6 )
+ggsave("../Figures/Fig4e_table.pdf",p$table, height=2, width=5)
+ggsave("../Figures/Fig4e_plot.pdf",p$plot, height=4, width=5)
+fit_cox<-coxph(Surv(VPFS_upd,VRelapse)~rel_gap_bin, data=df)  # 0.028 for continuous 
+```
 
 
