@@ -1,0 +1,250 @@
+---
+title: "06-lefse"
+output: html_document
+date: "2026-10-07"
+---
+
+
+# lefse
+Fig 2c, Fid 2d, Fig3b, Fig 3c
+
+samples from baseline_samples_abxfiltered  were used for lefse
+../Figures/2026-07-15_results: CR1 lefse on titer
+../Figures/2026-07-17_results: CR1 lefse on Remission
+
+* when we only want to keep the taxa with LDA>4 after running lefse, running this following line.
+```
+# want to only know the one with LDA>4, manully filter it. 
+   system(str_glue("docker run --rm --platform linux/amd64 -v \"$PWD\":\"$PWD\" {lefse_docker_image} lefse_plot_cladogram.py --format pdf \"$PWD/{results_dir}/lefse/lefse_input_LDA4.output\" \"$PWD/{results_dir}/lefse/{dataset_pre}.lda4.cladogram.pdf\""))
+```
+* for titer, the lefse_dir <- "../Figures/2026-07-15_results/lefse"
+* for remission, the lefse_dir <- "../Figures/2026-07-17_results/lefse"
+* Fig2c
+
+```{r}
+
+lefse_docker_image <- "ghcr.io/vdblab/lefse:1.1.2"
+for (dataset in c(
+  file.path(lefse_dir, "lefse_input.txt")
+)) {
+  dataset_pre <- gsub(".txt", "", basename(dataset))
+  system(str_glue("docker run --rm --platform linux/amd64 -v \"$PWD\":\"$PWD\" {lefse_docker_image} lefse_format_input.py  \"$PWD/{dataset}\" \"$PWD/{results_dir}/lefse/{dataset_pre}.input\" -c 2 -s -1 -u 1 -o 1000000"))
+  system(str_glue("docker run --rm --platform linux/amd64 -v \"$PWD\":\"$PWD\" {lefse_docker_image} lefse_run.py \"$PWD/{results_dir}/lefse/{dataset_pre}.input\" \"$PWD/{results_dir}/lefse/{dataset_pre}.output\""))
+  system(str_glue("docker run --rm --platform linux/amd64 -v \"$PWD\":\"$PWD\" {lefse_docker_image} lefse_plot_res.py --format pdf \"$PWD/{results_dir}/lefse/{dataset_pre}.output\" \"$PWD/{results_dir}/lefse/{dataset_pre}.bar.pdf\""))
+  system(str_glue("docker run --rm --platform linux/amd64 -v \"$PWD\":\"$PWD\" {lefse_docker_image} lefse_plot_cladogram.py --format pdf \"$PWD/{results_dir}/lefse/{dataset_pre}.output\" \"$PWD/{results_dir}/lefse/{dataset_pre}.cladogram.pdf\""))
+  # # want to only know the one with LDA>4, manully filter it. 
+  # system(str_glue("docker run --rm --platform linux/amd64 -v \"$PWD\":\"$PWD\" {lefse_docker_image} lefse_plot_cladogram.py --format pdf \"$PWD/{results_dir}/lefse/lefse_input_LDA4.output\" \"$PWD/{results_dir}/lefse/{dataset_pre}.lda4.cladogram.pdf\""))
+  system(str_glue("docker run --rm --platform linux/amd64 -v \"$PWD\":\"$PWD\" {lefse_docker_image} lefse_plot_res.py --format pdf \"$PWD/{results_dir}/lefse/lefse_input_LDA4.output\" \"$PWD/{results_dir}/lefse/{dataset_pre}.lda4.bar.pdf\""))
+  
+  lefse_results <- read.csv(gsub(".txt", ".output", dataset), sep="\t", col.names = c("taxon", "groupmax", "group", "LDA", "p.adj"), header = FALSE) %>% filter(group != "")
+  
+  threshold <- 4 #quantile(lefse_results$LDA)["75%"]
+  plot_data <- lefse_results %>% filter(LDA >= threshold) %>%
+    mutate(LDA=ifelse(as.numeric(as.factor(group)) == 1, LDA, -LDA),
+           taxlabel=gsub(".*\\.", "", taxon))
+  if (n_distinct(plot_data$group) <=2){
+    ggsave(width=6, height=10,
+           filename = gsub(".txt", ".bar.75th.pdf", dataset), ggplot(plot_data, aes(x=LDA, y=reorder(taxon, LDA, decreasing=TRUE), fill=group)) + geom_bar(stat="identity") + 
+             scale_fill_manual(values=c("forestgreen", "purple")) + 
+             scale_x_continuous(n.breaks = 8) + 
+             geom_text(data=plot_data %>% mutate(taxlabel = ifelse(LDA > 0, taxlabel, "")), aes(label=taxlabel,  x=0), hjust=1, nudge_x = -.1) +
+             geom_text(data=plot_data %>% mutate(taxlabel = ifelse(LDA < 0, taxlabel, "")), aes(label=taxlabel, x=0), hjust=0, nudge_x = .1)  + 
+             theme(axis.line.y = element_blank(),
+                   axis.ticks.y = element_blank(),
+                   axis.text.y = element_blank(),
+                   axis.title.y = element_blank(),
+                   panel.grid.major.x = element_line(color="gray80"),
+                   panel.grid.minor.x = element_line(color="gray80")
+             ) + 
+             labs(x="LDA Score (Log10)")
+    )
+  }
+}
+
+```
+
+## plot the significant taxas from lefse
+
+* on titer
+
+* Fig2d
+
+```{r}
+s_family <- c("f__Lachnospiraceae")
+s_genus <- c("g__Blautia")
+ps_genus <- phyloseq3 %>% ps_filter(PriorRelapse==1) %>% tax_glom("genus")
+
+for (g in s_genus){
+  print(g)
+   keep_taxa <- taxa_names(ps_genus)[
+    as.character(tax_table(ps_genus)[, "genus"]) == g]
+   
+  taxa_df <- ps_genus %>%prune_taxa(keep_taxa, .) %>%speedyseq::psmelt() %>% filter(!is.na(c4_high_median))
+  ggplot(taxa_df, aes(x=c4_high_median, y = Abundance,color=c4_high_median))+
+    geom_boxplot(width=0.4, outlier.shape = NA)+
+    geom_jitter(width=0.4, alpha=0.6)+
+    scale_color_manual(values=c("#5ab4ac", "#d8b365"))+
+    ylab(g)+ 
+    xlab("Anti-GD2 IgG")+
+    theme_classic()+
+    theme(legend.position = "none")
+  file_name = paste0("../Figures/fig2d_", g,".pdf")
+  ggsave(file_name,  width=2, height=2, dpi=150)
+}
+
+ps_family <- phyloseq3 %>% ps_filter(PriorRelapse==1) %>% tax_glom("family")
+for (f in s_family ){
+  keep_taxa <- taxa_names(ps_family)[as.character(tax_table(ps_family)[, "family"]) == f]
+   
+  taxa_df <- ps_family %>%prune_taxa(keep_taxa, .) %>%speedyseq::psmelt() %>% filter(!is.na(c4_high_median))
+  ggplot(taxa_df, aes(x=c4_high_median, y = Abundance,color=c4_high_median))+
+    geom_boxplot(width=0.4, outlier.shape = NA)+
+    geom_jitter(width=0.4, alpha=0.6)+
+    scale_color_manual(values=c("#5ab4ac", "#d8b365"))+
+    ylab(f)+ 
+    xlab("Anti-GD2 IgG")+
+    theme_classic()+
+    theme(legend.position = "none")
+  file_name = paste0("../Figures/fig2d_", f,".pdf")
+  ggsave(file_name,  width=2, height=2, dpi=150)
+}
+
+```
+
+* on Remission
+* Fig 3d
+```{r}
+
+ps_order <- phyloseq3 %>% ps_filter(PriorRelapse==1) %>% tax_glom("order")
+orders <- c("o__Clostridiales")
+for (o in orders){
+   keep_taxa <- taxa_names(ps_order)[
+    as.character(tax_table(ps_order)[, "order"]) == o]
+   
+  taxa_df <- ps_order %>%prune_taxa(keep_taxa, .) %>%speedyseq::psmelt() %>%
+    mutate(event=ifelse(VRelapse==0 & VPFS>=12, "Remission",
+  ifelse(VRelapse==0 & VPFS<12, "remove",
+     ifelse(VRelapse==1 & VPFS>12, "Remission", "Relapse")))) %>%
+  filter(event!="remove")%>%
+    mutate(event= factor(event, levels=c("Remission","Relapse")))
+  ggplot(taxa_df, aes(x=event, y = Abundance,color=event))+
+    geom_boxplot(width=0.4, outlier.shape = NA)+
+    geom_jitter(width=0.4, alpha=0.6)+
+    
+    scale_color_manual(values=c("#2E9FDF", "#999999"))+
+    ylab(o)+ 
+    xlab("Anti-GD2 IgG")+
+    theme_classic()+
+    theme(legend.position = "none")
+  file_name = paste0("../Figures/Fig3c_", o,".pdf")
+  ggsave(file_name,  width=2, height=2, dpi=150)
+}
+
+
+ps_class <- phyloseq3 %>% ps_filter(PriorRelapse==1) %>% tax_glom("class")
+for (c in c("c__Clostridia") ){
+  keep_taxa <- taxa_names(ps_class)[
+    as.character(tax_table(ps_class)[, "class"]) == c]
+  
+  taxa_df <- ps_class %>%prune_taxa(keep_taxa, .) %>%speedyseq::psmelt() %>%
+    mutate(event=ifelse(VRelapse==0 & VPFS>=12, "Remission",
+  ifelse(VRelapse==0 & VPFS<12, "remove",
+     ifelse(VRelapse==1 & VPFS>12, "Remission", "Relapse")))) %>%
+  filter(event!="remove")%>%
+    mutate(event= factor(event, levels=c("Remission","Relapse")))
+  ggplot(taxa_df, aes(x=event, y = Abundance,color=event))+
+    geom_boxplot(width=0.4, outlier.shape = NA)+
+    geom_jitter(width=0.4, alpha=0.6)+
+    scale_color_manual(values=c("#2E9FDF", "#999999"))+
+    ylab(c)+
+    xlab("Anti-GD2 IgG")+
+    theme_classic()+
+    theme(legend.position = "none")
+  file_name = paste0("../Figures/Fig3c_", c,".pdf")
+  ggsave(file_name,  width=2, height=2, dpi=150)
+  
+  # KM plot with clostridia
+  
+  
+}
+
+
+```
+
+## distribution of relapse in CR1
+* Suppl Fig2e
+
+```{r}
+pheno<-cohort %>% 
+  inner_join(baseline_samples_abxfiltered ) %>% 
+  inner_join(titers %>% dplyr::select(UPN,c4_titer, c4_high_median )) %>% 
+  mutate(event=ifelse(VRelapse==0 & VPFS>=12, "Remission",
+  ifelse(VRelapse==0 & VPFS<12, "remove",
+     ifelse(VRelapse==1 & VPFS>12, "Remission", "Relapse")))) %>%
+  filter(event!="remove") %>%
+  mutate(c4_high_median = factor(c4_high_median, levels=c( "high_c4","low_c4")))
+
+ggplot(
+  pheno %>% filter(VRelapse == 1),
+  aes(x = VPFS_upd)
+) +
+  geom_histogram(
+    binwidth = 1,
+    boundary = 0,
+    closed = "left",
+    color = "white",
+    fill = "grey35"
+  ) +
+  geom_vline(
+    xintercept = 12,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  labs(
+    title = "Distribution of relapses",
+    x = "Time of relapse (day) since vaccine #1",
+    y = "Number of patients"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(face = "italic"),
+    axis.title = element_text(size = 11),
+    axis.text = element_text(size = 10)
+  )
+# ggsave("../Figures/Suppl_fig2e.pdf",width=4, height=3)
+
+```
+
+
+
+# KM plot of Clostria abundance
+* Fig3d
+
+```{r}
+ps_class <- phyloseq3 %>% ps_filter(PriorRelapse==1) %>% tax_glom("class")
+keep_taxa <- taxa_names(ps_class)[
+    as.character(tax_table(ps_class)[, "class"]) == "c__Clostridia"]
+taxa_df <- ps_class %>%prune_taxa(keep_taxa, .) %>%speedyseq::psmelt()
+  
+cohort_clostridia<-cohort %>% 
+  inner_join(baseline_samples_abxfiltered %>% dplyr::select(UPN, sampleid)) %>%
+  inner_join(taxa_df[,c("Sample","Abundance")], by=c("sampleid"="Sample") )
+
+x<-median(cohort_clostridia$Abundance)
+cohort_clostridia<-cohort_clostridia %>%
+  mutate(Clostrb=ifelse(Abundance>=x, "high", "low"))
+fit<-survfit(Surv(cohort_clostridia$VPFS_upd, cohort_clostridia$VRelapse)~Clostrb, data=cohort_clostridia)
+
+p2<-ggsurvplot(fit, data=cohort_clostridia,
+           palette = c( "#E7B800","#2E9FDF" ),
+           conf.int=TRUE,
+           pval=TRUE,
+           risk.table = T,
+           xlim = c(0,36),
+          break.x.by = 6 )
+ggsave("../Figures/fig2f_plot.pdf", p2$plot,height=4, width=5)
+ggsave("../Figures/fig2f_table.pdf", p2$table,height=2, width=5)
+
+```
+

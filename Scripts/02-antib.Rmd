@@ -114,7 +114,7 @@ ggsave("../Data/fig1c.pdf", width=3, height=3.5, dpi=150)
 
 ## Are baseline samples exposed to antibiotics? - Suppl fig 1
 ```{r, warning=F,  message=FALSE}
-baseline_sample_abx<-read.csv("../Data/03_baseline_samples_abxfiltered.csv")
+baseline_sample_abx<-read.csv("../Data/03_baseline_sample_abx.csv")
 
 baseline_sample_abx %>% mutate(UPN=as.character(UPN)) %>% 
   ggplot(aes(x=sample_day, y=UPN, color=exposed_sample)) +

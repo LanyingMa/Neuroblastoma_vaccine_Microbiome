@@ -1,0 +1,241 @@
+---
+title: "07-matched_MSK_public"
+output: html_document
+date: "2026-10-07"
+---
+
+
+
+# bray-curtis dissimilarity matrix
+```{r}
+ps_used <- readRDS("../Data/10-ps_used_age_model.rds")
+msk_ids <- data.frame(sample_data(ps_used)) %>%rownames_to_column("sampleid")%>%
+  filter(cohort == "MSK") %>%
+  pull(sampleid)
+
+public_ids <- data.frame(sample_data(ps_used)) %>%rownames_to_column("sampleid") %>%
+  filter(cohort == "public") %>%
+  pull(sampleid)
+
+# Extract only MSK-to-public distances
+ps_rel <- transform_sample_counts(
+  ps_used,
+  function(x) x / sum(x)
+)
+bray_dist <- phyloseq::distance(ps_rel,  method = "bray")
+bray_mat <- as.matrix(bray_dist)
+d_msk_public <- bray_mat[msk_ids, public_ids, drop = FALSE]
+
+
+```
+
+# pcoa
+```{r}
+
+mgxphy_ord <- phyloseq::ordinate(
+  ps_rel,
+  method = "PCoA",
+  distance = "bray"
+)
+p <- plot_ordination(
+  ps_rel,
+  mgxphy_ord,
+  color = "cohort"
+)
+
+coords <- p$data %>%rownames_to_column("sampleid") %>%
+  select(sampleid, Axis.1, Axis.2, cohort)
+
+
+```
+
+
+
+
+# get top3 matches for each MSK sample
+
+```{r}
+# top_matches <- as.data.frame(d_msk_public) %>%
+#   rownames_to_column("MSK") %>%
+#   pivot_longer(
+#     -MSK,
+#     names_to = "public",
+#     values_to = "bray_distance"
+#   ) %>%
+#   group_by(MSK) %>%
+#   slice_min(
+#     order_by = bray_distance,
+#     n = 3,
+#     with_ties = FALSE
+#   ) %>%
+#   arrange(MSK, bray_distance) %>%
+#   mutate(rank = row_number()) %>%
+#   ungroup()
+top_matches <- read.csv("../Data/23_top3_matches.csv")
+matched_samples <- data.frame(sample_data(ps_used)) %>%rownames_to_column("sampleid") %>%
+  filter(sampleid %in% c(top_matches$MSK, top_matches$public)) %>%
+  mutate(cohort = factor(cohort, levels = c("public","MSK")))
+
+p1<-ggplot(matched_samples, aes(x=cohort, y=age_mo, color= cohort))+
+  geom_boxplot(width=0.3, outlier.shape = NA)+
+  geom_jitter(width=0.15)+
+  stat_compare_means(comparison = list(c("public", "MSK")),method="wilcox.test",
+                     aes(label = after_stat(p.format) ))+
+      theme_classic()+
+    theme(legend.position = "none")+
+    scale_color_manual(values=c("gray50","red4"))+
+  labs(y="age in month")
+
+
+
+```
+
+* Fig4d
+```{r}
+coords_age <- coords %>% left_join(data.frame(sample_data(ps_used)) %>%rownames_to_column("sampleid") %>% select(sampleid,age_mo), by = c("sampleid")) %>%
+  mutate(cohort = factor(cohort, levels = c("public","MSK")))
+
+ggplot(coords_age, aes(x=Axis.1, y= age_mo/12, color=cohort))+ # change to year
+  geom_point(alpha=0.8) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(
+      y = stage( # so the line does not go down below 0
+        start = age_mo / 12,
+        after_stat = ifelse(y >= 0, y, NA)
+      ),
+      ymin = after_stat(pmax(ymin, 0)),
+      ymax = after_stat(pmax(ymax, 0))
+    )
+  )  +
+  ggpubr::stat_cor(method = "spearman")+
+  theme_classic()+
+    theme(legend.position = "none")+
+   coord_cartesian(ylim = c(0, NA)) +
+    scale_color_manual(values=c("gray50","red4"))+
+  labs(x="PCoA Axis 1",
+       y="Age in years")
+
+# ggsave("../Figures/fig4d.pdf", width=5, height=4)
+
+```
+
+* Suppl Fig3a and Suppl Fig3b
+
+```{r}
+
+top_matches_age <- top_matches %>% left_join(matched_samples[,c("sampleid","age_mo")], by = c("public"="sampleid")) %>%
+  group_by(MSK)%>% # for each MSK sample to get the averaged public samples
+  mutate(public_ave_age = mean(age_mo))
+
+matched_age_df <- 
+  top_matches_age %>% dplyr::select(MSK, public_ave_age) %>% unique() %>% 
+  left_join(matched_samples[,c("sampleid","age_mo")], by = c("MSK"="sampleid"))%>% # for msk samples
+  dplyr::rename(msk_age = age_mo) %>%
+  mutate( # define the gap and relative gap to msk_age
+    age_gap = msk_age - public_ave_age,
+    relative_age_gap = (msk_age - public_ave_age) / msk_age
+  )
+filtering <- samples %>% 
+  filter(sample_day>= -15 & sample_day <=15) %>% 
+  left_join(antib, by="UPN") %>%
+  mutate(
+         abx_pert = ifelse(is.na(abx_pert), "non-antib", abx_pert))%>%
+  mutate(abx_binary=ifelse(abx_pert=="non-antib", "no", "yes")) %>% 
+    mutate(abx_pert2=ifelse(abx_pert=="high/mod", "high/mod", "no/low")) %>% 
+  mutate(abx_pert2=ifelse(abx_pert=="non-antib", "no/low", abx_pert2))%>%
+  mutate(exposed_sample=case_when(
+    abx_pert2=="high/mod" & (sample_day < start_relative) ~ "pre",
+    abx_pert2=="high/mod" & (sample_day >= start_relative & sample_day <= end_relative) ~ "during",
+    abx_pert2=="high/mod" & (sample_day > end_relative) ~ "post",
+    abx_pert2=="no/low"|is.na(abx_pert2) ~ "no/low",
+    TRUE ~ NA_character_
+  )
+           ) %>%
+  filter(exposed_sample!="pre")
+
+
+matched_age_df_cohort <- matched_age_df %>%
+  mutate(msk_id = str_extract(MSK, "(?<=_)[^_]+(?=_)")) %>%
+  inner_join(filtering, by=c("msk_id"="sampleid")) %>%
+  left_join(cohort, by="UPN")%>%
+  mutate(age_gap_bin = ifelse(age_gap >= median(matched_age_df$age_gap),"High","Low"),
+         rel_gap_bin = ifelse(relative_age_gap >= median(matched_age_df$relative_age_gap),"High","Low"),
+          rel_gap_bin2 = ifelse(relative_age_gap >=sd(matched_age_df$relative_age_gap),"High","Low") 
+         )
+
+
+
+for (i in 1:2){
+  cr<- matched_age_df_cohort %>% filter(PriorRelapse==i) %>% select(MSK, msk_id, msk_age) %>% unique() %>%
+  left_join(top_matches[,c("MSK","public")], by="MSK")
+  msk<-  cr %>% select(msk_id, msk_age) %>% unique()
+# now get the paired public sample age
+  public_age_cr <- cr %>% left_join(matched_samples[, c("sampleid", "age_mo")], by=c("public"="sampleid")) 
+
+  public_cr_long <-  bind_rows(
+    msk %>%
+      transmute(
+        sample_id = msk_id,
+        cohort = "MSK",
+        age = msk_age
+      ),
+
+    public_age_cr %>%
+      transmute(
+        sample_id = public,
+        cohort = "healthy",
+        age = age_mo
+      )
+  )
+  ggplot(public_cr_long, aes(x=cohort, y=age, color= cohort))+
+  geom_boxplot(width=0.3, outlier.shape = NA)+
+  geom_jitter(width=0.15, alpha=0.8)+
+  stat_compare_means(comparison = list(c("healthy", "MSK")),method="wilcox.test",
+                     aes(label = after_stat(p.format) ))+
+      theme_classic()+
+    theme(legend.position = "none")+
+    scale_color_manual(values=c("gray50","red4"))+
+  labs(y=paste0("CR",i," age in month") )
+  ggsave(paste0("../Figures/suppl_fig3_CR",i,".pdf") , width = 3, height = 3.5)
+}
+
+
+
+```
+
+* Suppl Fig3c
+
+```{r}
+ggplot(matched_age_df_cohort%>%mutate(PriorRelapse=factor(PriorRelapse, levels=c("1","2"))),
+       aes(x=PriorRelapse, y=relative_age_gap, color=PriorRelapse) )+
+  geom_boxplot(width=0.3, outlier.shape = NA)+
+  geom_jitter(width=0.15, alpha=0.8)+
+  stat_compare_means(comparison = list(c("1", "2")),method="wilcox.test",
+                     aes(label = after_stat(p.format) ))+
+      theme_classic()+
+    theme(legend.position = "none")+
+    scale_color_manual(values=c("#355a9f","red4"))
+ggsave("../Figures/Suppl_fig3c_rel_age_gap_CR.pdf", width=4, height = 4)
+
+
+```
+
+*Suppl Fig3d
+
+```{r}
+
+matched_age_df_cohort%>%
+  mutate(PriorRelapse=factor(PriorRelapse, levels=c("1","2")) )%>%
+  left_join(titers[,c("UPN","c4_titer","c4_high_median")], by="UPN") %>%
+  ggplot(aes(x = relative_age_gap, y = c4_titer) ) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  ggpubr::stat_cor(method = "spearman") +
+  facet_wrap(~ PriorRelapse,scale="free_x") +
+  theme_classic() +
+  theme(legend.position = "none")
+ggsave("../Figures/suppl_fig3d_relAgeGap_titer.pdf", width=6, height = 4)
+```
+
+
+

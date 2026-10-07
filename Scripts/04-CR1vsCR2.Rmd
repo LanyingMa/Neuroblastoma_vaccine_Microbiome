@@ -1,7 +1,7 @@
 
 # Compare CR1 and CR2
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 library(yingtools2)
 ```
 
@@ -51,8 +51,24 @@ ggsave("../Figures/fig1d.pdf", width=3, height=3.5, dpi=150)
 ```{r, warning=F,  message=FALSE}
 physeq2 <- readRDS("../Data/03_phyloseq2_16s_aft_rev2.rds")
 
+
 phyloseq3<- phy.collapse.bins(physeq2, level=4,
-                            criteria = max.pctseqs <= 0.01 | pct.detectable <= 0.1)
+                            criteria = max.pctseqs <= 0.01 | pct.detectable <= 0.1) %>% tax_fix()
+phyloseq::tax_table(phyloseq3) <- phyloseq::tax_table(phyloseq3) %>%
+  as.data.frame() %>%
+  rownames_to_column("tax_name_tmp") %>%
+  dplyr::mutate(
+    dplyr::across(
+      -tax_name_tmp,
+      ~ gsub("^<miscellaneous>\\s*", "", as.character(.x))
+    )
+  ) %>%
+  column_to_rownames("tax_name_tmp") %>%
+  as.matrix() %>% 
+  phyloseq::tax_table() %>%
+  clean_SGB_genus()
+
+
 ord <- phyloseq::ordinate(phyloseq3%>% tax_glom("genus"), method = "PCoA", distance = "bray")
 
 plot_ordination(phyloseq3%>% tax_glom("genus"),ord, color = "PriorRelapse") +
