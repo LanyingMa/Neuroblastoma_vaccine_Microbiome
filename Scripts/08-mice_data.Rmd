@@ -1,0 +1,207 @@
+---
+title: "08-mice_data"
+output: html_document
+date: "2026-10-08"
+---
+
+
+```{r}
+
+phylo_2526_3t <- readRDS("../Data/phylo_2526_3t.rds")
+
+
+```
+
+# fig5b alpha div over time
+```{r}
+phylofull_alpha <-  phylo_2526_3t %>% 
+  estimate_richness(., measures="InvSimpson") %>%
+  rownames_to_column("sampleid") %>%
+  left_join(data.frame(sample_data(phylo_2526_3t)),by="sampleid" ) %>%
+  mutate(day= as.numeric(as.character(day)))
+
+ ggplot(
+   phylofull_alpha ,
+   aes(x = day, y = InvSimpson, color=treatment)
+ ) +
+   geom_line(aes(group = mouse_id), color = "grey60", alpha = 0.1, size=1)+
+   geom_point(alpha = 0.3) +
+  geom_smooth(aes(group = treatment), se = FALSE, size = 1.45, method = "loess") +  # Smooth overall
+   theme_classic()+
+   scale_x_continuous(
+     breaks = c(-7, 0, 7, 18, 67),
+     limits = c(-10, 70)
+   )+
+   scale_color_manual(values=c(
+    "saline_BG" = "#6F6F6C",
+    "vaccine_BG" = "#4673A4",
+    "vaccine_BG_V" = "#CF3131"
+  ))+
+   labs( y = "Inverse Simpson",
+         x="Day") +
+   theme_classic() +
+   theme(legend.position = "none")+
+   theme(
+     axis.text.y = element_text(size = 10)
+   )
+ ggsave("../Figures/Fig5b.pdf", width=9, height=4)
+ 
+```
+
+# clostridia abundance in 3 treatment
+* Fig 5c
+
+```{r}
+clostridia <- phylo_2526_3t %>% tax_glom("class") %>% 
+  subset_taxa(class == "c__Clostridia") %>%
+  ps_melt()
+
+ggplot(clostridia, aes(x=treatment, y=Abundance, color=treatment))+
+  geom_boxplot(width = 0.45, outlier.shape = NA) +
+  geom_jitter( width= 0.3, alpha = 0.5, size = 2,shape=20,stroke = NA)+
+  stat_compare_means(method = "wilcox.test", comparisons = list(c("saline_BG", "vaccine_BG"), c("vaccine_BG","vaccine_BG_V" ),c("saline_BG", "vaccine_BG_V")))+
+  scale_color_manual(values = c(
+    "saline_BG" = "#6F6F6C",
+    "vaccine_BG" = "#4673A4",
+    "vaccine_BG_V" = "#CF3131"
+  ))+
+  theme_classic()+
+  theme(legend.position = "none")+
+  labs(y="Abundance")
+ggsave("../Figures/Fig5c.pdf",width=4, height=4)
+
+```
+
+# Pcoa plot by treatment
+*Fig5d
+```{r}
+
+
+phylo_genus <- speedyseq::tax_glom(phylo_2526_3t %>% ps_filter(day== 18), "genus")
+
+bray_pcoa = ordinate(phylo_genus, "PCoA", "bray")
+pcoa_plot <- plot_ordination(phylo_genus, bray_pcoa, color = "treatment")
+pcoa_plot$layers[[1]]$aes_params$alpha <- 0.8
+pcoa_plot +
+  ggplot2::stat_ellipse(
+    mapping = aes(group = treatment, color = treatment), 
+    level = 0.95,
+    linewidth = 1
+  ) + theme_classic() + labs("day 18 samples")+
+    scale_color_manual(values=c(
+    "saline_BG" = "#6F6F6C",
+    "vaccine_BG" = "#4673A4",
+    "vaccine_BG_V" = "#CF3131"
+  ))+
+  theme(legend.position = "none")
+ggsave("../Figures/Fig5d.pdf",width=5, height=4)
+```
+
+# Microbial composition
+Fig5e
+
+```{r}
+top20_taxa <- names(sort(taxa_sums(phylo_2526_3t%>% tax_glom("genus")), decreasing = TRUE))[1:20]
+top20_genus <- as.character(tax_table(phylo_2526_3t%>% tax_glom("genus"))[top20_taxa, "genus"])
+palette_20 <- c(setNames(c("#3E74A7", "#C1D4DF","#549840", "#B8DA91","#F2A3A6","#D1342C","#F2B56A", "#F07F2B","#980043", "#dd1c77","#c994c7","#e7e1ef",  "#6A51A3","#9E9AC8", "#8C6D31","#BD9E39", "#3182BD","#9ECAE1", "#31A354","#A1D99B"), top20_genus)  ,"Other" = "grey70" )
+genus_df<- phylo_2526_3t %>% 
+  tax_agg("genus") %>% speedyseq::psmelt()
+alluvial_df <- genus_df %>%
+  mutate(
+    genus_plot = if_else(genus %in% top20_genus, genus, "Other"),
+    day = factor(day, levels = c(-7, 0, 7, 18, 67), ordered = TRUE)
+  ) %>%
+  group_by(treatment, mouse_id, day, genus_plot) %>%
+  summarise(
+    Abundance = sum(Abundance, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  complete(
+    treatment,mouse_id,day,genus_plot,fill = list(Abundance = 0)) %>%
+  group_by(treatment, mouse_id, day) %>%
+  mutate(
+    Abundance = Abundance / sum(Abundance)
+  ) %>%
+  ungroup() %>%
+  mutate(day = as.numeric(as.character(day)) )
+
+alluvial_df_plot <- alluvial_df %>%
+  group_by(treatment, mouse_id, day) %>%
+  mutate(
+    mouse_total = sum(Abundance, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  group_by(treatment, day) %>%
+  mutate(
+    n_observed_mice = n_distinct(mouse_id[mouse_total > 0]),
+    plot_abundance = if_else(
+      mouse_total > 0,
+      Abundance / n_observed_mice,
+      0
+    )
+  ) %>%
+  ungroup()
+
+ggplot(
+  alluvial_df_plot,
+  aes(
+    x = day,
+    y =plot_abundance,
+    stratum = genus_plot,
+    alluvium = interaction(treatment,mouse_id, genus_plot),
+    fill = genus_plot
+  )
+) +
+  ggalluvial::geom_alluvium(alpha = 0.4) +
+  ggalluvial::geom_stratum(width = 2,color = "black",linewidth = 0.2 ) +
+  facet_wrap(
+    ~ treatment,scales = "free_y") +
+  scale_fill_manual(values = palette_20) +
+  scale_x_continuous(breaks = c(-7, 0, 7, 18, 67))+
+  labs(
+    x = "Day",
+    y = "Relative abundance across mice",
+    fill = "Genus",
+    title = "Genus composition over time"
+  ) +
+  theme_classic()
+ggsave("../Figures/Fig5e.pdf", height=4,width = 10)
+
+```
+
+# Titer at day 49
+
+Fig5f
+```{r}
+phylo_2526_3t %>%
+  sample_data() %>%
+  data.frame() %>% # only on the mouse level
+  dplyr::select(mouse_id, exp_id, titer, treatment, prod_site) %>%unique() %>% 
+  ggplot(., aes(x=treatment, y= log10(titer+1) , color=treatment))+
+  geom_boxplot(width = 0.45, outlier.shape = NA) +
+  geom_jitter( width= 0.3, alpha = 0.5, size = 2) +
+  stat_compare_means(
+    method = "wilcox.test",
+    comparisons = list(c("vaccine_BG", "vaccine_BG_V"), c("saline_BG","vaccine_BG"), c("saline_BG","vaccine_BG_V")),
+    label = "p.format"
+  ) + 
+  scale_color_manual(values = c(
+    "saline_BG" = "#6F6F6C",
+    "vaccine_BG" = "#4673A4",
+    "vaccine_BG_V" = "#CF3131"
+  ))+
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(size=12, angle=45, hjust = 1),
+    legend.position = "none"
+  )+
+  labs(x="",
+       y="log10(Anti-GD2 titer)")
+
+ggsave("../Figures/Fig5f.pdf",width=5, height=5)
+
+```
+
+# tumor
+
+
