@@ -202,6 +202,106 @@ ggsave("../Figures/Fig5f.pdf",width=5, height=5)
 
 ```
 
+# alpha div and titer
+* Fig 5i
+```{r}
+
+phylo_2526_3t %>%
+   ps_filter(day==18) %>%
+  ps_filter(treatment=="vaccine_BG" | treatment=="vaccine_BG_V")%>%
+   tax_agg("genus") %>%
+  estimate_richness(., measures="InvSimpson") %>%
+  rownames_to_column("sampleid") %>%
+  left_join(data.frame(sample_data( phylo_2526_3t)),by="sampleid" ) %>%
+   mutate(titers_b = ifelse(titer > 118,"high", "low" )) %>%
+  filter(!is.na(titer))%>%
+  ggplot(., aes(x=titers_b, y= InvSimpson, color=titers_b))+
+  geom_boxplot(width = 0.45, outlier.shape = NA) +
+  geom_jitter( width= 0.3, alpha = 0.5, size = 2) +
+  stat_compare_means(
+    method = "wilcox.test",
+    comparisons = list(c("high", "low")),
+    label = "p.format"
+  ) + scale_x_discrete(
+    labels = c(
+      "high" = "High titer",
+      "low"  = "Low titer"
+    )
+  )+
+  scale_color_manual(values=c("#5ab4ac", "#d8b365"))+
+  labs(title = "alpha diversity at Day18 with titers")+
+  theme_classic()+
+  theme(
+    axis.text = element_text(size=12)
+
+  )
+ggsave("../Figures/Fig4i.pdf", width=4, height=4)
+```
+
+
 # tumor
+
+* Fig4g
+```{r}
+
+all_tumor <- read.csv("../Data/06_all_tumor.csv")
+tumor_long <- all_tumor %>%
+  pivot_longer(
+    cols = starts_with("d"),
+    names_to = "day",
+    values_to = "tumor_volume"
+  ) %>%
+  mutate(
+    day = as.numeric(str_remove(day, "^d")),
+    tumor_volume = as.numeric(as.character(tumor_volume))
+  ) 
+tumor_summary <- tumor_long %>%
+  filter(!is.na(tumor_volume)) %>%
+  group_by(treatment, day) %>%
+  summarise(
+    mean_tumor = mean(tumor_volume, na.rm = TRUE),
+    sd_tumor = sd(tumor_volume, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(se_tumor = sd_tumor / sqrt(n))
+ggplot(tumor_summary, aes(x = day, y = mean_tumor, color = treatment, group = treatment)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = mean_tumor - se_tumor,
+      ymax =mean_tumor + se_tumor
+    ), width = 0.5) +
+  scale_x_continuous(breaks = c(14, 17, 20, 24))+
+  scale_color_manual(values=c(
+    "saline_BG" = "#6F6F6C",
+    "vaccine_BG" = "#4673A4",
+    "vaccine_BG_V" = "#CF3131"
+  ))+
+  labs(
+    x = "Day",
+    y = "Mean tumor volume ± SD"
+  ) +
+  theme_classic()
+ggsave("../Figures/Fig4g.pdf",height = 4, width=7)
+
+```
+
+* Fig4j. clostridia with tumor
+```{r}
+clostridia_67 <- phylo_2526_3t %>% tax_glom("class") %>% 
+  subset_taxa(class == "c__Clostridia") %>%
+  ps_melt() %>%
+  filter(day ==67) %>%
+  left_join(tumor_long %>% filter(day==24)%>% select(mouse_id, tumor_volume), by="mouse_id")
+ggplot(clostridia_67, aes(x=Abundance, y=log10(tumor_volume+1)))+
+  geom_point(size=2, alpha=0.5)+
+  geom_smooth(method = "lm")+
+  stat_cor(method = "spearman",label.y = 1)+
+  theme_classic()
+ggsave("../Figures/Fig4j.pdf", width = 5, height=4)
+
+```
 
 
