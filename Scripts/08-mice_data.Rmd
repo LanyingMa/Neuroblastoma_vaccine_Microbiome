@@ -203,7 +203,7 @@ ggsave("../Figures/Fig5f.pdf",width=5, height=5)
 ```
 
 # alpha div and titer
-* Fig 5i
+* Fig 5h
 ```{r}
 
 phylo_2526_3t %>%
@@ -235,7 +235,7 @@ phylo_2526_3t %>%
     axis.text = element_text(size=12)
 
   )
-ggsave("../Figures/Fig4i.pdf", width=4, height=4)
+ggsave("../Figures/Fig5h.pdf", width=4, height=4)
 ```
 
 
@@ -288,7 +288,7 @@ ggsave("../Figures/Fig4g.pdf",height = 4, width=7)
 
 ```
 
-* Fig4j. clostridia with tumor
+* Fig4i. clostridia with tumor
 ```{r}
 clostridia_67 <- phylo_2526_3t %>% tax_glom("class") %>% 
   subset_taxa(class == "c__Clostridia") %>%
