@@ -241,7 +241,7 @@ ggsave("../Figures/Fig5h.pdf", width=4, height=4)
 
 # tumor
 
-* Fig4g
+* Fig5g
 ```{r}
 
 all_tumor <- read.csv("../Data/06_all_tumor.csv")
@@ -284,11 +284,11 @@ ggplot(tumor_summary, aes(x = day, y = mean_tumor, color = treatment, group = tr
     y = "Mean tumor volume ± SD"
   ) +
   theme_classic()
-ggsave("../Figures/Fig4g.pdf",height = 4, width=7)
+ggsave("../Figures/Fig5g.pdf",height = 4, width=7)
 
 ```
 
-* Fig4i. clostridia with tumor
+* Fig5i. clostridia with tumor
 ```{r}
 clostridia_67 <- phylo_2526_3t %>% tax_glom("class") %>% 
   subset_taxa(class == "c__Clostridia") %>%
@@ -300,7 +300,7 @@ ggplot(clostridia_67, aes(x=Abundance, y=log10(tumor_volume+1)))+
   geom_smooth(method = "lm")+
   stat_cor(method = "spearman",label.y = 1)+
   theme_classic()
-ggsave("../Figures/Fig4j.pdf", width = 5, height=4)
+ggsave("../Figures/Fig5i.pdf", width = 5, height=4)
 
 ```
 
