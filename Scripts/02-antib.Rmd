@@ -3,6 +3,8 @@
 
 ```{r}
 library(ggpubr)
+library(survival)
+library(survminer)
 ```
 
 ## Load info of abx dataset
@@ -78,7 +80,7 @@ p<-ggsurvplot(fit, data=cohort_antibiotics,
   theme(
     legend.position = "top"
   )
-ggsave("../Data/fig1b_plot.pdf",p$plot, height=4, width=5)
+ggsave("../Figures/fig1b_plot.pdf",p$plot, height=4, width=5)
 
 # multi varaiates
 formula_m <- as.formula(paste0("Surv(VPFS_upd, VRelapse) ~ abx_pert2+MYCN+PriorRelapse+age_vaccine"))
@@ -86,6 +88,7 @@ fit_cox <- coxph(
   formula_m,
   data = cohort_antibiotics
 )
+
 
 ```
 
@@ -130,7 +133,64 @@ ggsave("../Data/suppl_fig1d.pdf", height=3.5, width=6)
 
 ```
 
+## indications for antibiotic administration
+* suppl Table 2 
+```{r}
+st2 <- cohort_antibiotics %>% filter(!is.na(Reason)) %>% select(UPN, age_vaccine, HCT, MYCN, PriorRelapse, result, Reason, start_relative, end_relative)%>%
+  dplyr::rename(Antibiotic = result,
+                Start = start_relative,
+                End = end_relative,
+                Age=age_vaccine) %>%
+  mutate(Infection = ifelse(UPN %in% c("2748","7432","2730"), "Yes","No"),
+         Hospital_status = ifelse(UPN %in% c("7432"),"inpatient","outpatient"),
+         Reason = ifelse(Reason%in% c("rhinovirus enterovirus/ fever","influenza"), "fever",Reason),
+         )
+write.csv(st2, "../Data/suppleTable2.csv", row.names = F)
+```
 
 
+## cox regression analysis of PFS
+* Suppl Table 3
+
+```{r}
+
+cohort_titer_abx <- cohort_antibiotics%>% left_join(titers[,c("UPN","c4_titer","c4_high_median" )],by="UPN") %>%
+  left_join(glucan[,c("UPN","group")], by ="UPN") %>%
+  mutate(age_y=age_vaccine/12,
+         MYCN=factor(MYCN, levels=c("no","amplified")),
+      HCT=factor(HCT, levels=c("no","yes")),
+      PriorRelapse = factor(PriorRelapse, levels=c("1","2")),
+      c4_high_median=factor(c4_high_median, levels = c("low_c4","high_c4")),
+      VRelapse = as.numeric(VRelapse),
+      age_binary = ifelse(age_y >=5,"older", "younger"))
+
+
+uni_v_cox <- data.frame()
+
+
+for (var_i in c("age_vaccine", "MYCN", "PriorRelapse" ,"HCT","group","sex","abx_pert2","c4_high_median","age_y")){
+  df_i <- cohort_titer_abx %>% filter(!is.na(.data[[var_i]]))
+  formula_i <- as.formula(paste0("Surv(VPFS_upd, VRelapse) ~ ", var_i))
+  fit_i <- coxph(formula_i, data = df_i)
+  res_i <- broom::tidy(fit_i) %>% 
+    filter(term != "(Intercept)") %>% 
+    mutate(
+      variable = var_i,
+      HR = exp(estimate),
+      loer95 =  exp(estimate - 1.96 * std.error), 
+      upper95  = exp(estimate + 1.96 * std.error),
+      n = nrow(df_i)
+    )
+  uni_v_cox <- bind_rows(uni_v_cox, res_i)
+  }
+ # write.csv(uni_v_cox, "../Data/Suppl_tbl2_uni_univariates_cox.csv", row.names = F)
+# mutlivariates
+formula_m <- as.formula("Surv(VPFS_upd, VRelapse) ~ age_vaccine+PriorRelapse+abx_pert2+MYCN")
+fit <- coxph(formula_m, data = cohort_titer_abx)
+summary(fit)
+
+
+
+```
 
 
