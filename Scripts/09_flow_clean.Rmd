@@ -1,0 +1,77 @@
+
+Flow cytometry data on mice experiments
+
+#spleens
+* suppl Fig5a 
+for DCs, cDC1, cDC2, absolute counts and percentages
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(readxl)
+
+spln_all_results<- read_xlsx("../Data/Source_Data_flow.xlsx", sheet=4)
+
+
+
+for (var in c("DCs_perc","cDC1_perc", "cDC2_perc","DCs", "cDC1","cDC2"  )) {
+  if (grepl("_perc$", var)) {
+    y_label <- paste0(sub("_perc$", "", var), " (%)")
+    } else {
+      y_label <- paste0(var, " (cells/ml)")
+      }
+  spln_all_results %>% 
+    ggplot(aes(x=treatment, y=.data[[var]], color=treatment))+
+    geom_boxplot(width=0.4, outlier.shape = NA, size=0.4)+
+      geom_jitter(width=0.4, alpha=0.5)+
+    theme_classic()+
+    xlab("")+
+    ylab(y_label)+
+    scale_color_manual(values=c("grey20", "#2E9FDF", "#cf3131")) +
+    stat_compare_means(comparisons=list(c("control","Vaccine"), c("Vaccine", "Vaccine_vanco"), c("control", "Vaccine_vanco"))) +
+    theme(axis.title.x = element_text(size = 15, angle = 30, hjust = 1))+
+    theme(legend.position = "none") 
+}
+
+
+
+```
+
+# Ing LN
+* suppl Fig 5b on CD19 in darining lymph node
+```{r}
+
+exp_all_ln_counts<- read_xlsx("../Data/Source_Data_flow.xlsx", sheet=5)
+
+#for CD19_perc and CD19
+
+exp_all_ln_counts %>% 
+  mutate(CD19_perc=as.numeric(CD19_perc)) %>% 
+  mutate(CD19=as.numeric(CD19)) %>% 
+  ggplot(aes(x=treatment, y=CD19_perc, color=treatment))+ 
+  geom_boxplot(width=0.4, outlier.shape = NA, size=0.4)+
+    geom_jitter(width=0.4, alpha=0.5) +
+  theme_classic()+
+  xlab("")+
+  ylab("CD19%")+
+  scale_color_manual(values=c("grey20", "#2E9FDF", "#cf3131")) +
+  stat_compare_means(comparisons=list(c("control","Vaccine"), c("Vaccine", "Vaccine_vanco"), c("control", "Vaccine_vanco"))) +
+  theme(axis.title.x = element_text(size = 15, angle = 30, hjust = 1))+
+  theme(legend.position = "none") 
+
+exp_all_ln_counts %>% 
+  mutate(CD19_perc=as.numeric(CD19_perc)) %>% 
+  mutate(CD19=as.numeric(CD19)) %>% 
+  ggplot(aes(x=treatment, y=CD19, color=treatment))+ 
+  geom_boxplot(width=0.4, outlier.shape = NA, size=0.4)+
+    geom_jitter(width=0.4, alpha=0.5) +
+  theme_classic()+
+  xlab("")+
+  ylab("CD19(cells/ml)")+
+  scale_color_manual(values=c("grey20", "#2E9FDF", "#cf3131")) +
+  stat_compare_means(comparisons=list(c("control","Vaccine"), c("Vaccine", "Vaccine_vanco"), c("control", "Vaccine_vanco"))) +
+  theme(axis.title.x = element_text(size = 15, angle = 30, hjust = 1))+
+  theme(legend.position = "none")
+
+```
+
