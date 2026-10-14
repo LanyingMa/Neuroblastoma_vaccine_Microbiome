@@ -309,4 +309,54 @@ ggsave("../Figures/Fig4e_plot.pdf",p$plot, height=4, width=5)
 fit_cox<-coxph(Surv(VPFS_upd,VRelapse)~rel_gap_bin, data=df)  # 0.028 for continuous 
 ```
 
+#randomly choose 94 healthy samples then 94*3 matched healthy samples
+would their age be different?
+
+```{r}
+set.seed(42) 
+healthy_94 <- sample(public_ids, 94, replace = FALSE)
+eligible_public_ids <- public_ids[!(public_ids %in%healthy_94)]
+# find the matched 94*3 samples based on bray_curtis dissimilarity matrix
+bray_dist <- phyloseq::distance(ps_rel%>%ps_filter(cohort=="public"),  method = "bray")
+bray_mat <- as.matrix(bray_dist)
+d_healthy_public <- bray_mat[healthy_94, eligible_public_ids, drop = FALSE] # only the 94 with other public ids
+
+top_matches_healthy <- as.data.frame(d_healthy_public) %>%
+  rownames_to_column("healthy_94") %>%
+  pivot_longer(
+    -healthy_94,
+    names_to = "public",
+    values_to = "bray_distance"
+  ) %>%
+  group_by(healthy_94) %>%
+  slice_min(
+    order_by = bray_distance,
+    n = 3,
+    with_ties = FALSE
+  ) %>%
+  arrange(healthy_94, bray_distance) %>%
+  mutate(rank = row_number()) %>%
+  ungroup()
+# write.csv(top_matches_healthy, "../Data/top_matches_healthy.csv", row.names = F)
+healthy_random <- data.frame(sample_data(ps_used)) %>%rownames_to_column("sampleid") %>%
+  filter(sampleid %in% c(healthy_94)) %>%
+  mutate(cohort = "random")
+healthy_matched <- data.frame(sample_data(ps_used)) %>%rownames_to_column("sampleid") %>%
+  filter(sampleid %in% c(top_matches_healthy$public)) %>%
+  mutate(cohort = "matched")
+match_samples_healthy <- rbind(healthy_random, healthy_matched)
+ggplot(match_samples_healthy, aes(x=cohort, y=age_mo, color= cohort))+
+  geom_boxplot(width=0.3, outlier.shape = NA)+
+  geom_jitter(width=0.15, alpha=0.8)+
+  stat_compare_means(comparison = list(c("random", "matched")),method="wilcox.test",
+                     aes(label = after_stat(p.format) ))+
+      theme_classic()+
+    theme(legend.position = "none")+
+    scale_color_manual(values=c("gray50","grey30"))+
+  labs(y="age in month")
+
+ggsave("../Figures/PublicRandom_Publicmatched_age_comparison.pdf",width=4, height=4)
+```
+
+
 
